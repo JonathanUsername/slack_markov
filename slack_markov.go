@@ -13,11 +13,13 @@ import (
 	"io/ioutil"
 	"math/rand"
 	"os"
+	"regexp"
 	"strings"
 )
 
 var DEFAULT_WORD_LENGTH int = 2000
 var DEFAULT_PREFIX_LENGTH int = 2
+var STRIP_TAGS bool = false
 
 // Prefix is a Markov chain prefix of one or more words.
 type Prefix []string
@@ -70,7 +72,7 @@ func (c *Chain) Generate(n int, single bool) string {
 	var possible_prefixes []string
 	// select first word randomly
 	for each, _ := range c.chain {
-		if len(each) > 6 && each[:6] == "<end/>" {
+		if len(each) > 6 && each[:6] == "<end/>" && !strings.Contains(each[6:], "<end/>") {
 			possible_prefixes = append(possible_prefixes, each)
 		}
 	}
@@ -134,7 +136,15 @@ func buildPost(user string, scrape string, prefixL int, wordL int, single_senten
 	b := io.Reader(strings.NewReader(cleanbody))
 	c.Build(b)
 	text := c.Generate(wordL, single_sentence)
-	return text
+	var rx string
+	if STRIP_TAGS {
+		rx = "<[^>]*>"
+	} else {
+		rx = "<end/>"
+	}
+	strip_tags_regex, _ := regexp.Compile(rx)
+	cleantext := strip_tags_regex.ReplaceAllString(text, "")
+	return cleantext
 }
 
 func main() {
@@ -142,18 +152,24 @@ func main() {
 	var userid string
 	flag.IntVar(&DEFAULT_PREFIX_LENGTH, "prefix", 2, "Prefix length for chain creation.")
 	flag.IntVar(&DEFAULT_WORD_LENGTH, "max-words", 100, "Maximum word length for output.")
+	flag.BoolVar(&STRIP_TAGS, "no-tags", false, "Whether to strip html tags from input.")
 	flag.StringVar(&user, "user", "", "User name.")
 	flag.Parse()
+	if user == "" {
+		fmt.Println("Missing --user flag for user name.")
+		os.Exit(1)
+	}
 	bytes, err := ioutil.ReadAll(os.Stdin)
 	check(err)
 	scrape := string(bytes)
 	userid = getId(user)
-	resp := buildPost(userid, scrape, DEFAULT_PREFIX_LENGTH, DEFAULT_WORD_LENGTH, true)
+	resp := buildPost(userid, scrape, DEFAULT_PREFIX_LENGTH, DEFAULT_WORD_LENGTH, false)
 	fmt.Println(resp)
 }
 
 func getId(name string) string {
 	var id string
+	// A file generated with "curl https://slack.com/api/users.list?token=$TOKEN > userslist.json"
 	file, err := ioutil.ReadFile("userslist.json")
 	check(err)
 	categories, err := fromJson(string(file)).Array("members")
